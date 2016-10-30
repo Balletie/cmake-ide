@@ -124,6 +124,24 @@
   :group 'cmake-ide
   :safe #'stringp)
 
+(defcustom cmake-ide-command-wrapper-function
+  #'identity
+  "Function to modify any commands just before execution
+
+This function is applied to any commands (cmake, make, ninja, or
+compile-command if set) just before it is executed. It is given a
+list of the executable name and the arguments, and should return
+a new list. This can be useful for running the commands in a
+specific execution environment, such as can be done with the
+`nix-shell' command (see also the nix-emacs project).
+
+Default value is the `identity' function, which does no
+modifications whatsoever."
+  :group 'cmake-ide
+  :type '(choice (const :tag "Do not modify commands" identity)
+		 (function :tag "Modify command with a custom function"))
+  :risky t)
+
 (defcustom cmake-ide-header-search-other-file
   t
   "Whether or not to search for a corresponding source file for headers when setting flags for them."
@@ -541,9 +559,12 @@ the object file's name just above."
 (defun cmake-ide--run-cmake-impl (project-dir cmake-dir)
   "Run the CMake process for PROJECT-DIR in CMAKE-DIR."
   (when project-dir
-    (let ((default-directory cmake-dir))
+    (let* ((default-directory cmake-dir)
+	   (args `("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON" ,project-dir))
+	   (cmake-command (funcall cmake-ide-command-wrapper-function
+				   (cons cmake-ide-cmake-command args))))
       (cmake-ide--message "Running cmake for src path %s in build path %s" project-dir cmake-dir)
-      (start-process "cmake" "*cmake*" cmake-ide-cmake-command "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON" project-dir))))
+      (apply 'start-process "cmake" "*cmake*" cmake-command))))
 
 
 (defun cmake-ide--get-build-dir ()
@@ -898,10 +919,10 @@ the object file's name just above."
 (defun cmake-ide-compile ()
   "Compile the project."
   (interactive)
-  (if (cmake-ide--build-dir-var)
-      (compile (cmake-ide--get-compile-command (cmake-ide--build-dir-var)))
-    (let ((command (read-from-minibuffer "Compiler command: " compile-command)))
-      (compile command)))
+  (let ((command (if (cmake-ide--build-dir-var)
+		     (cmake-ide--get-compile-command (cmake-ide--build-dir-var))
+		   (read-from-minibuffer "Compiler command: " compile-command))))
+    (compile (combine-and-quote-strings (funcall cmake-ide-command-wrapper-function (cons command '())))))
   (cmake-ide--run-rc))
 
 
